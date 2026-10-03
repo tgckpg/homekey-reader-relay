@@ -1,0 +1,22 @@
+{
+  "title": "HomeKey Reader",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select a HomeKey Reader",
+        "description": "Choose a currently visible reader.",
+        "data": {
+          "address": "Reader"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Set up {name}",
+        "description": "Set up HomeKey Reader {name} at {address}?"
+      }
+    },
+    "abort": {
+      "already_configured": "This reader is already configured.",
+      "no_devices_found": "No HomeKey Reader is currently visible over Bluetooth."
+    }
+  }
+}

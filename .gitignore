@@ -1,0 +1,7 @@
+# ESP-IDF
+esp32/build/
+esp32/sdkconfig
+esp32/sdkconfig.old
+
+# macOS
+.DS_Store

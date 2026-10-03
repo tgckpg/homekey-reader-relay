@@ -1,0 +1,16 @@
+{
+  "domain": "homekey_reader",
+  "name": "HomeKey Reader",
+  "version": "0.2.0",
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "bluetooth": [
+    {
+      "service_data_uuid": "7b1e0001-7b1e-4a11-9abc-0123456789ab",
+      "connectable": false
+    }
+  ],
+  "codeowners": [],
+  "integration_type": "device",
+  "iot_class": "local_push"
+}
