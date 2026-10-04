@@ -9,8 +9,8 @@
 #include "reader.h"
 
 #define PN532_UART UART_NUM_1
-#define PN532_TX_GPIO 4
-#define PN532_RX_GPIO 3
+#define PN532_TX_GPIO 3
+#define PN532_RX_GPIO 4
 #define PN532_BAUD 115200
 #define COMMAND_TIMEOUT_MS 1000
 #define POLL_INTERVAL_MS 300
@@ -69,41 +69,84 @@ static bool read_exact(uint8_t *data, size_t len, int64_t deadline)
 /* Returns 0 for ACK, positive for a normal frame, -1 for malformed/timeout.
  * Extended frames are unnecessary for these small commands and are rejected.
  */
+static bool read_logged(uint8_t *buffer, size_t len,
+                        int64_t deadline, const char *stage)
+{
+    if (!read_exact(buffer, len, deadline)) {
+        ESP_LOGW(TAG, "RX failed at %s: wanted %u bytes",
+                 stage, (unsigned)len);
+        return false;
+    }
+
+#ifdef FRAME_DEBUG
+    ESP_LOGI(TAG, "RX %s (%u bytes)", stage, (unsigned)len);
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, buffer, len, ESP_LOG_INFO);
+#endif
+    return true;
+}
+
 static int read_frame(uint8_t *payload, size_t capacity, int64_t deadline)
 {
     uint8_t prefix[3] = {0};
     do {
         prefix[0] = prefix[1];
         prefix[1] = prefix[2];
-        if (!read_exact(&prefix[2], 1, deadline)) {
+        if (!read_logged(&prefix[2], 1, deadline, "preamble byte")) {
             return -1;
         }
-    } while (prefix[0] != 0 || prefix[1] != 0 || prefix[2] != 0xff);
+    } while (prefix[0] != 0 ||
+             prefix[1] != 0 ||
+             prefix[2] != 0xff);
 
     uint8_t lengths[2];
-    if (!read_exact(lengths, 2, deadline)) {
+    if (!read_logged(lengths, sizeof(lengths), deadline, "LEN/LCS")) {
         return -1;
     }
+
     if (lengths[0] == 0 && lengths[1] == 0xff) {
         uint8_t postamble;
-        return read_exact(&postamble, 1, deadline) && postamble == 0 ? 0 : -1;
+        if (!read_logged(&postamble, 1, deadline, "ACK postamble")) {
+            return -1;
+        }
+        if (postamble != 0) {
+            ESP_LOGW(TAG, "invalid ACK postamble");
+            return -1;
+        }
+        return 0;
     }
+
     size_t len = lengths[0];
-    if (len == 0 || (uint8_t)(lengths[0] + lengths[1]) != 0 || len > capacity) {
+    if (len == 0 ||
+        (uint8_t)(lengths[0] + lengths[1]) != 0 ||
+        len > capacity) {
+        ESP_LOGW(TAG, "invalid length: LEN=%u LCS=0x%02X capacity=%u",
+                 (unsigned)len, lengths[1], (unsigned)capacity);
         return -1;
     }
-    if (!read_exact(payload, len, deadline)) {
+
+    if (!read_logged(payload, len, deadline, "payload")) {
         return -1;
     }
+
     uint8_t tail[2];
-    if (!read_exact(tail, 2, deadline) || tail[1] != 0) {
+    if (!read_logged(tail, sizeof(tail), deadline, "DCS/postamble")) {
         return -1;
     }
+    if (tail[1] != 0) {
+        ESP_LOGW(TAG, "invalid postamble: 0x%02X", tail[1]);
+        return -1;
+    }
+
     uint8_t checksum = tail[0];
     for (size_t i = 0; i < len; ++i) {
         checksum += payload[i];
     }
-    return checksum == 0 ? (int)len : -1;
+    if (checksum != 0) {
+        ESP_LOGW(TAG, "invalid checksum: sum=0x%02X", checksum);
+        return -1;
+    }
+
+    return (int)len;
 }
 
 /* Normal frame builder. cmd includes command code, excludes host TFI (D4). */
@@ -113,6 +156,7 @@ static int command(const uint8_t *cmd, size_t cmd_len, uint8_t response[128])
     if (cmd_len == 0 || cmd_len > sizeof(frame) - 8) {
         return -1;
     }
+
     size_t len = cmd_len + 1;
     frame[0] = 0;
     frame[1] = 0;
@@ -121,6 +165,7 @@ static int command(const uint8_t *cmd, size_t cmd_len, uint8_t response[128])
     frame[4] = (uint8_t)(0 - len);
     frame[5] = 0xd4;
     memcpy(frame + 6, cmd, cmd_len);
+
     uint8_t checksum = 0xd4;
     for (size_t i = 0; i < cmd_len; ++i) {
         checksum += cmd[i];
@@ -128,23 +173,53 @@ static int command(const uint8_t *cmd, size_t cmd_len, uint8_t response[128])
     frame[6 + cmd_len] = (uint8_t)(0 - checksum);
     frame[7 + cmd_len] = 0;
 
+#ifdef FRAME_DEBUG
+    ESP_LOGI(TAG, "TX command 0x%02X (%u bytes)",
+             cmd[0], (unsigned)(cmd_len + 8));
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, frame, cmd_len + 8, ESP_LOG_INFO);
+#endif
+
     if (!write_bytes(frame, cmd_len + 8)) {
+        ESP_LOGE(TAG, "TX write failed");
         goto failed;
     }
-    int64_t deadline = esp_timer_get_time() + COMMAND_TIMEOUT_MS * 1000;
+
+    int64_t deadline =
+        esp_timer_get_time() + COMMAND_TIMEOUT_MS * 1000;
     int n;
+
     do {
         n = read_frame(response, 128, deadline);
+#ifdef FRAME_DEBUG
+        if (n > 0) {
+            ESP_LOGI(TAG, "RX response (%d bytes)", n);
+            ESP_LOG_BUFFER_HEX_LEVEL(TAG, response, n, ESP_LOG_INFO);
+        } else if (n == 0) {
+            ESP_LOGI(TAG, "RX ACK");
+        } else {
+            ESP_LOGW(TAG, "RX failed or timed out: %d", n);
+        }
+#else
+        if (n < 0) {
+            ESP_LOGW(TAG, "RX failed or timed out: %d", n);
+        }
+#endif
     } while (n == 0); /* ACK is not the command response. */
-    if (n >= 2 && response[0] == 0xd5 && response[1] == (uint8_t)(cmd[0] + 1)) {
-        ESP_LOG_BUFFER_HEX_LEVEL(TAG, response, n, ESP_LOG_DEBUG);
+
+    if (n >= 2 &&
+        response[0] == 0xd5 &&
+        response[1] == (uint8_t)(cmd[0] + 1)) {
         return n;
     }
 
 failed:
     /* Host ACK aborts a pending PN532 command. Drain before the next command. */
     ESP_LOGW(TAG, "command 0x%02X failed or timed out", cmd[0]);
+
+    ESP_LOGI(TAG, "TX abort ACK (%u bytes)", (unsigned)sizeof(ack));
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, ack, sizeof(ack), ESP_LOG_INFO);
     (void)write_bytes(ack, sizeof(ack));
+
     vTaskDelay(pdMS_TO_TICKS(20));
     (void)uart_flush_input(PN532_UART);
     return -1;
@@ -155,25 +230,42 @@ static bool initialize_reader(void)
     static const uint8_t wakeup[] = {0x55, 0x55, 0, 0, 0};
     static const uint8_t firmware[] = {0x02};
     static const uint8_t sam[] = {0x14, 0x01, 0x14, 0x01};
-    /* RFConfiguration / MaxRetries: preserve ATR/PSL defaults, scan once. */
     static const uint8_t retries[] = {0x32, 0x05, 0xff, 0x01, 0x00};
     uint8_t response[128];
+
+    /* Discard stale input before starting this attempt. */
+    ESP_ERROR_CHECK(uart_flush_input(PN532_UART));
+
+    ESP_LOGI(TAG, "TX wakeup");
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, wakeup, sizeof(wakeup), ESP_LOG_INFO);
     if (!write_bytes(wakeup, sizeof(wakeup))) {
+        ESP_LOGE(TAG, "wakeup write failed");
         return false;
     }
-    vTaskDelay(pdMS_TO_TICKS(10));
-    (void)uart_flush_input(PN532_UART);
+
+    /* Conservative diagnostic delay, not a specified minimum. */
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    /* Put the reader into normal mode before querying firmware. */
+    if (command(sam, sizeof(sam), response) != 2) {
+        ESP_LOGE(TAG, "SAMConfiguration failed");
+        return false;
+    }
+
     int n = command(firmware, sizeof(firmware), response);
     if (n != 6 || response[2] != 0x32) {
-        ESP_LOGE(TAG, "invalid PN532 firmware response");
+        ESP_LOGE(TAG, "invalid firmware response: length=%d", n);
         return false;
     }
+
     ESP_LOGI(TAG, "PN532 firmware %u.%u, support=0x%02X",
              response[3], response[4], response[5]);
-    if (command(sam, sizeof(sam), response) != 2 ||
-        command(retries, sizeof(retries), response) != 2) {
+
+    if (command(retries, sizeof(retries), response) != 2) {
+        ESP_LOGE(TAG, "RFConfiguration failed");
         return false;
     }
+
     return true;
 }
 

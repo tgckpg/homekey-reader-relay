@@ -74,3 +74,13 @@ byte 4..7   mock UID = DE AD BE EF
 LIBNFC_DEVICE=pn532_uart:/dev/cu.usbserial-8310 nfc-list
 LIBNFC_DEVICE=pn532_uart:/dev/cu.usbserial-8310 nfc-poll
 ```
+
+Test pins
+```
+idf.py -B build-pin-test -D PIN_TEST=ON build flash monitor
+```
+
+Test pnc532
+```
+idf.py -B build-pnc532-test -D PNC532_TEST=ON build flash monitor
+```
