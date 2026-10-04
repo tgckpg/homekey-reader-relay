@@ -9,14 +9,14 @@ if(PIN_TEST)
     )
 elseif(PNC532_TEST)
     idf_component_register(
-        SRCS "pnc532_test.c"
+        SRCS "pn532_test.c"
         INCLUDE_DIRS "."
         PRIV_REQUIRES nvs_flash driver esp_timer
                       esp_hw_support esp_driver_uart
     )
 else()
     idf_component_register(
-        SRCS "main.c" "pnc532.c"
+        SRCS "main.c" "pn532.c"
         INCLUDE_DIRS "."
         PRIV_REQUIRES bt nvs_flash driver esp_timer
                       esp_hw_support esp_driver_uart

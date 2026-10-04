@@ -236,8 +236,10 @@ static bool initialize_reader(void)
     /* Discard stale input before starting this attempt. */
     ESP_ERROR_CHECK(uart_flush_input(PN532_UART));
 
+#ifdef FRAME_DEBUG
     ESP_LOGI(TAG, "TX wakeup");
     ESP_LOG_BUFFER_HEX_LEVEL(TAG, wakeup, sizeof(wakeup), ESP_LOG_INFO);
+#endif
     if (!write_bytes(wakeup, sizeof(wakeup))) {
         ESP_LOGE(TAG, "wakeup write failed");
         return false;
