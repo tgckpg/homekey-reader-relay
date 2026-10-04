@@ -179,10 +179,28 @@ static int command(const uint8_t *cmd, size_t cmd_len, uint8_t response[128])
     ESP_LOG_BUFFER_HEX_LEVEL(TAG, frame, cmd_len + 8, ESP_LOG_INFO);
 #endif
 
-    if (!write_bytes(frame, cmd_len + 8)) {
-        ESP_LOGE(TAG, "TX write failed");
-        goto failed;
-    }
+	bool startup = cmd[0] == 0x02 || cmd[0] == 0x14;
+
+	if (startup) {
+		static const uint8_t wakeup[] = {0x55, 0x55, 0, 0, 0};
+		uint8_t packet[sizeof(wakeup) + sizeof(frame)];
+		size_t packet_len = sizeof(wakeup) + cmd_len + 8;
+
+		memcpy(packet, wakeup, sizeof(wakeup));
+		memcpy(packet + sizeof(wakeup), frame, cmd_len + 8);
+
+		ESP_LOGI(TAG, "TX startup packet");
+		ESP_LOG_BUFFER_HEX_LEVEL(
+			TAG, packet, packet_len, ESP_LOG_INFO);
+
+		if (!write_bytes(packet, packet_len)) {
+			goto failed;
+		}
+	} else {
+		if (!write_bytes(frame, cmd_len + 8)) {
+			goto failed;
+		}
+	}
 
     int64_t deadline =
         esp_timer_get_time() + COMMAND_TIMEOUT_MS * 1000;
@@ -227,48 +245,36 @@ failed:
 
 static bool initialize_reader(void)
 {
-    static const uint8_t wakeup[] = {0x55, 0x55, 0, 0, 0};
     static const uint8_t firmware[] = {0x02};
     static const uint8_t sam[] = {0x14, 0x01, 0x14, 0x01};
     static const uint8_t retries[] = {0x32, 0x05, 0xff, 0x01, 0x00};
     uint8_t response[128];
 
     /* Discard stale input before starting this attempt. */
-    ESP_ERROR_CHECK(uart_flush_input(PN532_UART));
+	ESP_ERROR_CHECK(uart_flush_input(PN532_UART));
 
-#ifdef FRAME_DEBUG
-    ESP_LOGI(TAG, "TX wakeup");
-    ESP_LOG_BUFFER_HEX_LEVEL(TAG, wakeup, sizeof(wakeup), ESP_LOG_INFO);
-#endif
-    if (!write_bytes(wakeup, sizeof(wakeup))) {
-        ESP_LOGE(TAG, "wakeup write failed");
-        return false;
-    }
+	int n = command(firmware, sizeof(firmware), response);
+	if (n != 6 || response[2] != 0x32) {
+		ESP_LOGE(TAG, "invalid firmware response: length=%d", n);
+		return false;
+	}
 
-    /* Conservative diagnostic delay, not a specified minimum. */
-    vTaskDelay(pdMS_TO_TICKS(100));
+	ESP_LOGI(TAG, "PN532 firmware %u.%u, support=0x%02X",
+			 response[3], response[4], response[5]);
 
-    /* Put the reader into normal mode before querying firmware. */
-    if (command(sam, sizeof(sam), response) != 2) {
-        ESP_LOGE(TAG, "SAMConfiguration failed");
-        return false;
-    }
+	vTaskDelay(pdMS_TO_TICKS(100));
 
-    int n = command(firmware, sizeof(firmware), response);
-    if (n != 6 || response[2] != 0x32) {
-        ESP_LOGE(TAG, "invalid firmware response: length=%d", n);
-        return false;
-    }
+	if (command(sam, sizeof(sam), response) != 2) {
+		ESP_LOGE(TAG, "SAMConfiguration failed");
+		return false;
+	}
 
-    ESP_LOGI(TAG, "PN532 firmware %u.%u, support=0x%02X",
-             response[3], response[4], response[5]);
+	vTaskDelay(pdMS_TO_TICKS(100));
 
-    if (command(retries, sizeof(retries), response) != 2) {
-        ESP_LOGE(TAG, "RFConfiguration failed");
-        return false;
-    }
-
-    return true;
+	if (command(retries, sizeof(retries), response) != 2) {
+		return false;
+	}
+	return true;
 }
 
 /* 1 = card, 0 = confirmed no target, -1 = transport/protocol failure. */
