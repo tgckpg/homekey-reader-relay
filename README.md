@@ -67,3 +67,10 @@ byte 1      message type = 1 (mock PN532 tag)
 byte 2..3   sequence, uint16 little-endian
 byte 4..7   mock UID = DE AD BE EF
 ```
+
+### Testing the PN532
+
+```
+LIBNFC_DEVICE=pn532_uart:/dev/cu.usbserial-8310 nfc-list
+LIBNFC_DEVICE=pn532_uart:/dev/cu.usbserial-8310 nfc-poll
+```

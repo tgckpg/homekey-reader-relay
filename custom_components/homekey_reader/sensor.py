@@ -65,28 +65,27 @@ class HomeKeyReaderUidSensor(SensorEntity):
             if payload is None:
                 return
 
-            if len(payload) < 8:
+            if len(payload) not in (7, 10, 13):
                 _LOGGER.warning(
-                    "Short HomeKey Reader packet from %s: %s",
+                    "Invalid HomeKey Reader packet from %s: %s",
                     service_info.address,
                     payload.hex(),
                 )
                 return
 
             version = payload[0]
-            msg_type = payload[1]
-            seq = int.from_bytes(payload[2:4], "little")
-            data = payload[4:]
+            seq = int.from_bytes(payload[1:3], "little")
+            data = payload[3:]
 
-            if version != 1 or msg_type != 1 or len(data) < 4:
+            if version != 1:
                 _LOGGER.warning(
-                    "Unsupported HomeKey Reader packet from %s: %s",
+                    "Unsupported HomeKey Reader version from %s: %s",
                     service_info.address,
                     payload.hex(),
                 )
                 return
 
-            uid = ":".join(f"{byte:02X}" for byte in data[:4])
+            uid = ":".join(f"{byte:02X}" for byte in data)
 
             self._attr_native_value = uid
             self._attr_available = True
@@ -95,7 +94,6 @@ class HomeKeyReaderUidSensor(SensorEntity):
                 "rssi": service_info.rssi,
                 "sequence": seq,
                 "protocol_version": version,
-                "message_type": msg_type,
                 "raw": payload.hex(),
             }
             self.async_write_ha_state()
