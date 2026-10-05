@@ -118,32 +118,40 @@ static int gap_event(struct ble_gap_event *event, void *arg)
 {
 	(void)arg;
 	ESP_LOGI(TAG, "GAP event=%d (CONNECT=%d DISCONNECT=%d)",
-		 event->type,
-		 BLE_GAP_EVENT_CONNECT,
-		 BLE_GAP_EVENT_DISCONNECT);
+			event->type,
+			BLE_GAP_EVENT_CONNECT,
+			BLE_GAP_EVENT_DISCONNECT);
 	switch (event->type) {
-	case BLE_GAP_EVENT_CONNECT:
-		if (event->connect.status == 0) {
-			connection = event->connect.conn_handle;
-			relay_connected(true);
+		case BLE_GAP_EVENT_LINK_ESTAB:
+			struct ble_gap_conn_desc desc;
+			uint16_t handle = event->link_estab.conn_handle;
+			int rc = ble_gap_conn_find(handle, &desc);
+
+			ESP_LOGI(TAG, "LINK_ESTAB status=%d handle=%u lookup=%d",
+					event->link_estab.status, (unsigned)handle, rc);
+
+			if (rc == 0) {
+				connection = handle;
+				relay_connected(true);
+				have_reply = false;
+				ESP_LOGI(TAG, "BLE gateway connected");
+			} else {
+				advertise();
+			}
+			break;
+		case BLE_GAP_EVENT_DISCONNECT:
+			relay_connected(false);
+			connection = BLE_HS_CONN_HANDLE_NONE;
 			have_reply = false;
-			ESP_LOGI(TAG, "BLE gateway connected");
-		} else
+			ESP_LOGI(TAG, "BLE gateway disconnected: %d", event->disconnect.reason);
 			advertise();
-		break;
-	case BLE_GAP_EVENT_DISCONNECT:
-		relay_connected(false);
-		connection = BLE_HS_CONN_HANDLE_NONE;
-		have_reply = false;
-		ESP_LOGI(TAG, "BLE gateway disconnected: %d", event->disconnect.reason);
-		advertise();
-		break;
-	case BLE_GAP_EVENT_ADV_COMPLETE:
-		if (connection == BLE_HS_CONN_HANDLE_NONE)
-			advertise();
-		break;
-	default:
-		break;
+			break;
+		case BLE_GAP_EVENT_ADV_COMPLETE:
+			if (connection == BLE_HS_CONN_HANDLE_NONE)
+				advertise();
+			break;
+		default:
+			break;
 	}
 	return 0;
 }
