@@ -7,6 +7,8 @@
 #define RELAY_VALUE_MAX (RELAY_HEADER + RELAY_APDU_MAX)
 /* GATT callbacks are nonblocking. PN532/UART work stays in its owner task. */
 void relay_init(void);
+/* Snapshot the public Home group ID; false until Go configures this connection. */
+bool relay_ecp_group(uint8_t out[8]);
 void relay_connected(bool connected);
 size_t relay_status(uint8_t out[18]);
 size_t relay_response(uint8_t out[RELAY_VALUE_MAX]);

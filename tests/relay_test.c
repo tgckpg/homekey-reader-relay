@@ -108,6 +108,23 @@ int main(void)
 	relay_init();
 	nfc_card_t card = {.uid = {1, 2, 3, 4}, .uid_len = 4, .target = 1, .sak = 0x20};
 	assert(!relay_card(&card));
+	uint8_t group[8], b[32], gid[8] = {1,2,3,4,5,6,7,8};
+	assert(!relay_ecp_group(group));
+	assert(!relay_write(b, make_request(b, 3, 0, 0, 0, 8, gid, 8)));
+	relay_connected(true);
+	assert(!relay_write(b, make_request(b, 3, 1, 0, 0, 8, gid, 8)));
+	assert(!relay_write(b, make_request(b, 3, 0, 0, 0, 7, gid, 7)));
+	assert(relay_write(b, make_request(b, 3, 0, 0, 0, 8, gid, 8)));
+	assert(relay_ecp_group(group) && memcmp(group, gid, 8) == 0);
+	active = true;
+	assert(relay_write(b, make_request(b, 3, 0, 0, 0, 8, gid, 8)));
+	assert(active); /* Configuration never interrupts the APDU session. */
+	active = false;
+	assert(relay_write(b, make_request(b, 3, 0, 0, 0, 0, NULL, 0)));
+	assert(!relay_ecp_group(group));
+	assert(relay_write(b, make_request(b, 3, 0, 0, 0, 8, gid, 8)));
+	relay_connected(false);
+	assert(!relay_ecp_group(group));
 	for (scenario = 0; scenario < 3; scenario++) {
 		relay_connected(true);
 		phase = exchanges = 0;

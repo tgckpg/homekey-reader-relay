@@ -317,6 +317,53 @@ static bool initialize_reader(void)
 	return true;
 }
 
+/* ECP v2 Home Key, with software CRC-A. These bytes identify a Home;
+ * they are public routing metadata, never authentication credentials. */
+static void build_ecp(uint8_t frame[18], const uint8_t group[8])
+{
+	static const uint8_t prefix[] = {0x6a, 0x02, 0xcb, 0x02, 0x06, 0x02, 0x11, 0x00};
+	memcpy(frame, prefix, sizeof(prefix));
+	memcpy(frame + 8, group, 8);
+	uint16_t crc = 0x6363;
+	for (unsigned i = 0; i < 16; ++i) {
+		uint8_t b = frame[i] ^ (uint8_t)crc;
+		b ^= (uint8_t)(b << 4);
+		crc = (crc >> 8) ^ ((uint16_t)b << 8) ^ ((uint16_t)b << 3) ^ (b >> 4);
+	}
+	frame[16] = (uint8_t)crc;
+	frame[17] = (uint8_t)(crc >> 8);
+}
+
+static bool broadcast_ecp(const uint8_t group[8])
+{
+	/* 106 kbps Type A, full bytes, software CRC (no duplicate hardware CRC).
+	 * InListPassiveTarget restores Type A activation/CRC settings afterward. */
+	static const uint8_t registers[] = {0x08,
+		0x63, 0x02, 0x00, /* CIU_TxMode */
+		0x63, 0x03, 0x00, /* CIU_RxMode */
+		0x63, 0x05, 0x40, /* CIU_TxAuto: 100% ASK */
+		0x63, 0x3c, 0x10, /* CIU_Control: initiator, including first scan */
+		0x63, 0x3d, 0x00}; /* CIU_BitFraming */
+	static const uint8_t rf_on[] = {0x32, 0x01, 0x03};
+	static const uint8_t short_timeout[] = {0x32, 0x02, 0x00, 0x0b, 0x08};
+	static const uint8_t normal_timeout[] = {0x32, 0x02, 0x00, 0x0b, 0x0a};
+	uint8_t response[128], cmd[19] = {0x42};
+	if (command(registers, sizeof(registers), response) != 2 ||
+		command(rf_on, sizeof(rf_on), response) != 2 ||
+		command(short_timeout, sizeof(short_timeout), response) != 2)
+		return false;
+	/* Allow RF to settle before transmitting the proprietary polling frame. */
+	vTaskDelay(pdMS_TO_TICKS(5));
+	build_ecp(cmd + 1, group);
+	int n = command_full(cmd, sizeof(cmd), response, sizeof(response), 250);
+	/* ECP is a broadcast: PN532 RF timeout 01 is expected, not a UART timeout. */
+	bool ok = n >= 3 && (response[2] == 0 || (n == 3 && response[2] == 1));
+	if (!ok)
+		ESP_LOGW(TAG, "ECP broadcast failed: length=%d", n);
+	bool restored = command(normal_timeout, sizeof(normal_timeout), response) == 2;
+	return ok && restored;
+}
+
 /* 1 = card, 0 = confirmed no target, -1 = transport/protocol failure. */
 static int poll_card(nfc_card_t *card)
 {
@@ -352,7 +399,19 @@ void start_polling(pn532_card_callback_t callback)
 	nfc_presence_t presence = {0};
 	for (;;) {
 		nfc_card_t card = {0};
-		int result = poll_card(&card);
+		uint8_t group[8];
+		bool ecp = relay_ecp_group(group);
+		if (!ecp) {
+			/* Do not wake Wallet with ordinary polls before Go supplies
+			 * this connection's provisioned Home identifier. */
+			presence = (nfc_presence_t){0};
+			release_rf();
+			vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
+			continue;
+		}
+		/* Announce before activation, including when a phone would otherwise
+		 * answer with its default payment/transit applet. */
+		int result = !broadcast_ecp(group) ? -1 : poll_card(&card);
 		bool was_present = presence.present;
 		if (nfc_presence_update(&presence, result, &card)) {
 			ESP_LOGI(TAG, "card detected, UID length=%u", card.uid_len);

@@ -6,6 +6,8 @@ static int64_t now;
 static unsigned writes;
 static uint8_t last_tx[300];
 static size_t last_tx_len;
+static uint8_t tx_history[16][300];
+bool relay_ecp_group(uint8_t out[8]) { (void)out; return false; }
 int64_t esp_timer_get_time(void) { return now; }
 void vTaskDelay(TickType_t t) { now += t * 1000; }
 int uart_read_bytes(int u, void *dst, size_t len, TickType_t t)
@@ -31,6 +33,8 @@ int uart_write_bytes(int u, const void *d, size_t n)
 	assert(n <= sizeof(last_tx));
 	memcpy(last_tx, d, n);
 	last_tx_len = n;
+	assert(writes < 16);
+	memcpy(tx_history[writes], d, n);
 	++writes;
 	return (int)n;
 }
@@ -170,6 +174,34 @@ int main(void)
 	response(reply, sizeof(reply));
 	assert(pn532_exchange(1, apdu, sizeof(apdu), out, sizeof(out), &out_length) == 3);
 	assert(pn532_exchange(1, apdu, RELAY_APDU_MAX + 1, out, sizeof(out), &out_length) == 1);
-	puts("PN532: startup prefix preserved; APDU >64 bytes; status/chaining rejection; fragmented "
+	const uint8_t gid[] = {0x94, 0x62, 0x5f, 0xd2, 0xc3, 0x2c, 0xf3, 0xc2};
+	uint8_t ecp[18];
+	build_ecp(ecp, gid);
+	assert(memcmp(ecp, "\x6a\x02\xcb\x02\x06\x02\x11\x00", 8) == 0);
+	assert(memcmp(ecp + 8, gid, 8) == 0);
+	/* Independent CRC-A vector for the Home Key subtype 06. */
+	assert(ecp[16] == 0x66 && ecp[17] == 0x3a);
+	const uint8_t reg_ok[] = {0xd5, 0x09}, timeout[] = {0xd5, 0x43, 1};
+	reset();
+	response(reg_ok, 2);
+	response(rf, 2);
+	response(rf, 2);
+	response(timeout, 3);
+	response(rf, 2);
+	assert(broadcast_ecp(gid));
+	assert(writes == 5); /* Expected RF timeout never causes an abort ACK. */
+	assert(tx_history[0][6] == 0x08 && tx_history[0][9] == 0);
+	assert(tx_history[3][6] == 0x42);
+	assert(memcmp(tx_history[3] + 7, ecp, 18) == 0);
+	reset();
+	response(reg_ok, 2);
+	response(rf, 2);
+	response(rf, 2);
+	const uint8_t bad_status[] = {0xd5, 0x43, 2};
+	response(bad_status, 3);
+	response(rf, 2);
+	assert(!broadcast_ecp(gid));
+	assert(writes == 5);
+	puts("PN532: ECP frame/CRC-A, raw transmit and expected timeout; startup prefix preserved; APDU >64 bytes; status/chaining rejection; fragmented "
 		 "frames, checksums, timeout and UID parsing passed");
 }

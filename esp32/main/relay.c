@@ -16,6 +16,8 @@ typedef struct {
 static SemaphoreHandle_t mutex;
 static QueueHandle_t requests;
 static bool connected, active, busy, ending;
+static bool ecp_configured;
+static uint8_t ecp_group[8];
 static uint32_t session_counter, session;
 static nfc_card_t current;
 static request_t assembling;
@@ -63,6 +65,8 @@ void relay_connected(bool value)
 	ESP_LOGI("homekey-reader", "relay_connected(%s)", value ? "true" : "false");
 	xSemaphoreTake(mutex, portMAX_DELAY);
 	connected = value;
+	ecp_configured = false;
+	memset(ecp_group, 0, sizeof(ecp_group));
 	active = false;
 	ending = true;
 	busy = false;
@@ -70,6 +74,15 @@ void relay_connected(bool value)
 	response_len = 0;
 	xQueueReset(requests);
 	xSemaphoreGive(mutex);
+}
+bool relay_ecp_group(uint8_t out[8])
+{
+	xSemaphoreTake(mutex, portMAX_DELAY);
+	bool ready = connected && ecp_configured;
+	if (ready)
+		memcpy(out, ecp_group, 8);
+	xSemaphoreGive(mutex);
+	return ready;
 }
 size_t relay_status(uint8_t out[18])
 {
@@ -102,6 +115,21 @@ bool relay_write(const uint8_t *p, size_t n)
 	uint16_t seq = be16(p + 6), off = be16(p + 8), total = be16(p + 10);
 	bool ok = false;
 	xSemaphoreTake(mutex, portMAX_DELAY);
+	/* Configuration is connection-scoped and fits the minimum ATT MTU.
+	 * No UART work here; the NFC owner snapshots it before polling. */
+	if (p[1] == 3) {
+		if (connected && sid == 0 && seq == 0 && off == 0 &&
+			(total == 0 || total == 8) && n == (size_t)RELAY_HEADER + total) {
+			ecp_configured = total == 8;
+			memset(ecp_group, 0, sizeof(ecp_group));
+			if (ecp_configured)
+				memcpy(ecp_group, p + RELAY_HEADER, 8);
+			ok = true;
+			ESP_LOGI("homekey-reader", "Home Key ECP %s",
+					 ecp_configured ? "configured" : "disabled");
+		}
+		goto done;
+	}
 	if (!connected || !active || ending || sid != session)
 		goto done;
 	if (p[1] == 2) {

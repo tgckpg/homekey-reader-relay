@@ -81,10 +81,11 @@ idf.py -B build-pn532-test -D PNC532_TEST=ON build flash monitor
 ## NFC APDU relay
 
 The firmware now exposes session status and an APDU mailbox for `homekey-go`
-0.0.3. Flash the matching firmware before updating the Go service. NFC runs in
+0.0.5. Deploy the matching firmware and Go service together. NFC runs in
 one UART owner task; the RF field stays on throughout authentication.
 
-The first test uses an existing Home Key opened manually in Wallet. Express-mode
-ECP wakeup, FAST authentication and unknown-device attestation are separate
-follow-up work. `homekey-go` verifies the key; UID detection alone never unlocks.
+Go now supplies the provisioned Home group identifier over BLE. The reader
+emits Home Key ECP before activation so iOS can select the key automatically.
+Polling waits for this configuration on every connection. FAST authentication
+and unknown-device attestation remain follow-up work. `homekey-go` verifies the key; UID detection alone never unlocks.
 See `esp32/PROTOCOL.md` for the mailbox format and `tests/run.sh` for host tests.
