@@ -3,7 +3,12 @@
 
 In development. NOT FOR USE!
 
-## Home Assistant UI setup
+Current firmware connects directly to `homekey-go` over BLE GATT and relays
+NFC APDUs. The HACS component and service-data examples below describe the
+earlier advertisement-based firmware; current firmware does not emit those
+UID advertisements. See [the current relay protocol](esp32/PROTOCOL.md).
+
+## Legacy Home Assistant UI setup
 
 HACS
 
@@ -36,21 +41,9 @@ idf.py set-target esp32c3
 idf.py -p /dev/cu.usbmodem101 flash monitor
 ```
 
-## Mock Flow
+## Current flow
 
 ```text
-ESP32-C3
-  mock PN532 UID (DE:AD:BE:EF)
-       |
-       v
-BLE service-data advertisement
-       |
-       v
-Home Assistant Bluetooth
-       |
-       +--> HomeKey Reader config entry
-       +--> sensor: Last NFC UID
-       +--> event: homekey_reader_packet
 ```
 
 Service UUID:
@@ -62,8 +55,8 @@ Service UUID:
 Advertisement payload after the UUID:
 
 ```text
-byte 0      protocol version = 1
-byte 1      message type = 1 (mock PN532 tag)
+byte 0	  protocol version = 1
+byte 1	  message type = 1 (mock PN532 tag)
 byte 2..3   sequence, uint16 little-endian
 byte 4..7   mock UID = DE AD BE EF
 ```
@@ -80,7 +73,18 @@ Test pins
 idf.py -B build-pin-test -D PIN_TEST=ON build flash monitor
 ```
 
-Test pnc532
+Test pn532
 ```
-idf.py -B build-pnc532-test -D PNC532_TEST=ON build flash monitor
+idf.py -B build-pn532-test -D PNC532_TEST=ON build flash monitor
 ```
+
+## NFC APDU relay
+
+The firmware now exposes session status and an APDU mailbox for `homekey-go`
+0.0.3. Flash the matching firmware before updating the Go service. NFC runs in
+one UART owner task; the RF field stays on throughout authentication.
+
+The first test uses an existing Home Key opened manually in Wallet. Express-mode
+ECP wakeup, FAST authentication and unknown-device attestation are separate
+follow-up work. `homekey-go` verifies the key; UID detection alone never unlocks.
+See `esp32/PROTOCOL.md` for the mailbox format and `tests/run.sh` for host tests.

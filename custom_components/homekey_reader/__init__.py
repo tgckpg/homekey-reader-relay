@@ -10,11 +10,11 @@ PLATFORMS = [Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up HomeKey Reader from a config entry."""
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    return True
+	"""Set up HomeKey Reader from a config entry."""
+	await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+	return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a HomeKey Reader config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+	"""Unload a HomeKey Reader config entry."""
+	return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
