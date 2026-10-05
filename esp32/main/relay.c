@@ -60,6 +60,7 @@ void relay_init(void)
 }
 void relay_connected(bool value)
 {
+	ESP_LOGI("homekey-reader", "relay_connected(%s)", value ? "true" : "false");
 	xSemaphoreTake(mutex, portMAX_DELAY);
 	connected = value;
 	active = false;

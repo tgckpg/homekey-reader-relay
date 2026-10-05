@@ -35,8 +35,13 @@ static int status_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ct
 	(void)conn;
 	(void)attr;
 	(void)arg;
-	if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR)
+	if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) {
+		ESP_LOGW(TAG, "Unexpected status access: op=%u conn=%u attr=%u",
+				(unsigned)ctxt->op,
+				(unsigned)conn,
+				(unsigned)attr);
 		return BLE_ATT_ERR_UNLIKELY;
+	}
 	uint8_t data[18];
 	size_t n = relay_status(data);
 	return os_mbuf_append(ctxt->om, data, n) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
@@ -112,6 +117,10 @@ static void advertise(void);
 static int gap_event(struct ble_gap_event *event, void *arg)
 {
 	(void)arg;
+	ESP_LOGI(TAG, "GAP event=%d (CONNECT=%d DISCONNECT=%d)",
+		 event->type,
+		 BLE_GAP_EVENT_CONNECT,
+		 BLE_GAP_EVENT_DISCONNECT);
 	switch (event->type) {
 	case BLE_GAP_EVENT_CONNECT:
 		if (event->connect.status == 0) {
