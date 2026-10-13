@@ -6,3 +6,4 @@ esp32/sdkconfig.old
 
 # macOS
 .DS_Store
+*.heic

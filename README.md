@@ -6,6 +6,7 @@ PN532 -> | ESP32-C3 (this part) | -> Home Assistant
          | HLK-LD2410S sensor   |
 ```
 
+![wiring](images/wiring.webp)
 
 In development. NOT FOR USE!
 
