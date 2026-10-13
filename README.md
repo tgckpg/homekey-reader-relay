@@ -29,7 +29,7 @@ RF off + PowerDown -> stop BLE -> ESP32-C3 deep sleep until OT2 HIGH.
 | --- | --- |
 | LD2410S 3V3 | Always-on regulated 3.3 V |
 | LD2410S GND | Common GND |
-| LD2410S OT2 | **GPIO5** (HIGH = present) |
+| LD2410S OT2 | **GPIO1** (HIGH = present) |
 | LD2410S OT1/TX and RX | Disconnected in relay firmware |
 | PN532 RX | **GPIO3** |
 | PN532 TX | **GPIO4** |
@@ -48,7 +48,7 @@ wakes. Never connect battery voltage directly to 3.3 V power or GPIO pins.
 
 - Presence sleep is enabled by default on ESP32-C3. Disable it for bench
   operation without LD2410S; otherwise an unconnected input reads absent.
-- OT2 defaults to GPIO5. Only GPIO0-5 support this C3 deep-sleep wake path;
+- OT2 defaults to GPIO1. Only GPIO0-5 support this C3 deep-sleep wake path;
   GPIO3/4 conflict with PN532 and are rejected at compile time. Avoid GPIO2
   because it is a boot strapping pin.
 - Default additional absence confirmation: **1 second** after observing LOW.

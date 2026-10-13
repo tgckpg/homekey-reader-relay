@@ -12,7 +12,7 @@ menu "Home Key presence / sleep"
         int "LD2410S OT2 GPIO"
         depends on HOMEKEY_PRESENCE_ENABLED
         range 0 5
-        default 5
+        default 1
         help
             C3 deep-sleep wake requires GPIO0-5. GPIO3/4 are reserved for
             PN532 UART and rejected at compile time. Avoid strapping GPIO2.
