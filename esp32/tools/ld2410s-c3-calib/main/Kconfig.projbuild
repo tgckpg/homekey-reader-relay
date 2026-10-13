@@ -1,0 +1,22 @@
+menu "LD2410S bench"
+    config BENCH_UART_TX
+        int "ESP32 UART TX GPIO (connect to sensor RX)"
+        range 0 10
+        default 4
+    config BENCH_UART_RX
+        int "ESP32 UART RX GPIO (connect to sensor TX/OT1)"
+        range 0 10
+        default 3
+    config BENCH_AP_SSID
+        string "Bench access point SSID"
+        default "LD2410S-Bench"
+    config BENCH_AP_PASSWORD
+        string "Bench access point password (8 to 63 characters)"
+        default "calibrate2410"
+    config BENCH_STA_SSID
+        string "Optional home Wi-Fi SSID (empty = AP only)"
+        default ""
+    config BENCH_STA_PASSWORD
+        string "Optional home Wi-Fi password"
+        default ""
+endmenu

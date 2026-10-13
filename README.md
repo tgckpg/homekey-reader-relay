@@ -1,5 +1,11 @@
 # HomeKey Reader Relay
-`PN532 -> ESP32-C3 (this part) -> Home Assistant`
+
+```
+PN532 -> | ESP32-C3 (this part) | -> Home Assistant
+         |  ^                   |
+         | HLK-LD2410S sensor   |
+```
+
 
 In development. NOT FOR USE!
 
@@ -7,6 +13,11 @@ Current firmware connects directly to `homekey-go` over BLE GATT and relays
 NFC APDUs. The HACS component and service-data examples below describe the
 earlier advertisement-based firmware; current firmware does not emit those
 UID advertisements. See [the current relay protocol](esp32/PROTOCOL.md).
+
+
+## Workflow
+Presence -> HLK-LD2410S -> ESP32-C3 -> PN532
+
 
 ## Legacy Home Assistant UI setup
 
@@ -39,11 +50,6 @@ source "$HOME/.espressif/tools/activate_idf_v6.x.x.sh"
 cd esp32
 idf.py set-target esp32c3
 idf.py -p /dev/cu.usbmodem101 flash monitor
-```
-
-## Current flow
-
-```text
 ```
 
 Service UUID:
