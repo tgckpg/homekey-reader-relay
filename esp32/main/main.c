@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdatomic.h>
 #include <string.h>
 #include "esp_err.h"
 #include "esp_log.h"
@@ -13,6 +14,7 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "reader.h"
 #include "relay.h"
+#include "presence.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -68,6 +70,7 @@ static int apdu_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
 }
 static uint8_t own_addr_type;
 static uint16_t connection = BLE_HS_CONN_HANDLE_NONE;
+static atomic_bool shutting_down;
 /* Accessed only by the NimBLE host task. */
 static uint8_t reply[8];
 static bool have_reply;
@@ -157,6 +160,8 @@ static int gap_event(struct ble_gap_event *event, void *arg)
 }
 static void advertise(void)
 {
+	if (atomic_load(&shutting_down))
+		return;
 	struct ble_hs_adv_fields fields = {0};
 	fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
 	fields.uuids128 = (ble_uuid128_t *)&service_uuid;
@@ -223,11 +228,21 @@ static void nfc_task(void *arg)
 {
 	(void)arg;
 	start_polling(report_card);
+	/* PN532 owner has finished the last session and confirmed PowerDown. */
+	atomic_store(&shutting_down, true);
+	int rc;
+	while ((rc = nimble_port_stop()) != 0) {
+		ESP_LOGE(TAG, "NimBLE stop failed: %d; retrying", rc);
+		vTaskDelay(pdMS_TO_TICKS(1000));
+	}
+	ESP_ERROR_CHECK(nimble_port_deinit());
+	presence_enter_sleep();
 	vTaskDelete(NULL);
 }
 
 void app_main(void)
 {
+	presence_init();
 	relay_init();
 	esp_err_t err = nvs_flash_init();
 	if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

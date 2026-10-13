@@ -1,0 +1,37 @@
+menu "Home Key presence / sleep"
+    config HOMEKEY_PRESENCE_ENABLED
+        bool "Use LD2410S OT2 to control deep sleep"
+        depends on IDF_TARGET_ESP32C3
+        default y
+        help
+            Keep LD2410S powered. OT2 HIGH means present, LOW means absent.
+            Deep sleep disconnects BLE; Go must reconnect on every wake.
+            Disable for bench testing without the sensor.
+
+    config HOMEKEY_PRESENCE_GPIO
+        int "LD2410S OT2 GPIO"
+        depends on HOMEKEY_PRESENCE_ENABLED
+        range 0 5
+        default 5
+        help
+            C3 deep-sleep wake requires GPIO0-5. GPIO3/4 are reserved for
+            PN532 UART and rejected at compile time. Avoid strapping GPIO2.
+
+    config HOMEKEY_PRESENCE_ABSENCE_MS
+        int "Additional absence confirmation (ms)"
+        depends on HOMEKEY_PRESENCE_ENABLED
+        range 100 10000
+        default 1000
+        help
+            Added after the sensor's own absence delay. An active NFC session
+            finishes before sleep is considered.
+
+    config HOMEKEY_PRESENCE_BOOT_GRACE_MS
+        int "Minimum awake time after reset / power-on (ms)"
+        depends on HOMEKEY_PRESENCE_ENABLED
+        range 0 60000
+        default 10000
+        help
+            Gives the sensor time to start and USB time to connect. Skipped
+            on GPIO wake from deep sleep. Does not delay NFC startup.
+endmenu

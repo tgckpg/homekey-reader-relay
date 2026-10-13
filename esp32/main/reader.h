@@ -17,7 +17,8 @@ typedef struct {
 
 typedef bool (*pn532_card_callback_t)(const nfc_card_t *card);
 
-/* Blocks in the caller's task. Callback returns false if its queue is full. */
+/* Blocks in the caller's task. Returns only after absence and successful
+ * PN532 PowerDown; caller must stop BLE and enter deep sleep. */
 void start_polling(pn532_card_callback_t callback);
 /* Only called by the NFC owner task while its target is active. */
 int pn532_exchange(uint8_t target, const uint8_t *apdu, size_t length,

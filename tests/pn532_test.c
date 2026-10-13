@@ -7,6 +7,14 @@ static unsigned writes;
 static uint8_t last_tx[300];
 static size_t last_tx_len;
 static uint8_t tx_history[16][300];
+static bool held, deep_hold, sleep_requested;
+static bool auto_reply;
+static void response(const uint8_t *d, uint8_t n);
+bool presence_sleep_requested(void) { return sleep_requested; }
+int gpio_hold_en(int pin) { assert(pin == PN532_TX_GPIO); held = true; return ESP_OK; }
+int gpio_hold_dis(int pin) { assert(pin == PN532_TX_GPIO); held = false; return ESP_OK; }
+void gpio_deep_sleep_hold_en(void) { deep_hold = true; }
+void gpio_deep_sleep_hold_dis(void) { deep_hold = false; }
 bool relay_ecp_group(uint8_t out[8]) { (void)out; return false; }
 int64_t esp_timer_get_time(void) { return now; }
 void vTaskDelay(TickType_t t) { now += t * 1000; }
@@ -36,6 +44,20 @@ int uart_write_bytes(int u, const void *d, size_t n)
 	assert(writes < 16);
 	memcpy(tx_history[writes], d, n);
 	++writes;
+	if (auto_reply && n > 2) {
+		const uint8_t *frame = d;
+		if (frame[0] == 0x55)
+			frame += 5;
+		uint8_t cmd = frame[6];
+		uint8_t reply[] = {0xd5, (uint8_t)(cmd + 1), 0, 0, 0, 0};
+		if (cmd == 0x02) {
+			assert(now >= 10000); /* Explicit oscillator delay preceded firmware. */
+			reply[2] = 0x32;
+			response(reply, 6);
+		} else {
+			response(reply, cmd == 0x16 ? 3 : 2);
+		}
+	}
 	return (int)n;
 }
 int uart_wait_tx_done(int u, TickType_t t)
@@ -80,6 +102,8 @@ static void reset(void)
 	total = pos = 0;
 	now = 0;
 	writes = 0;
+	held = deep_hold = false;
+	auto_reply = sleep_requested = false;
 }
 static void append(const uint8_t *d, size_t n)
 {
@@ -202,6 +226,42 @@ int main(void)
 	response(rf, 2);
 	assert(!broadcast_ecp(gid));
 	assert(writes == 5);
+	/* Deep sleep is allowed only after a complete success response. */
+	const uint8_t sleeping[] = {0xd5, 0x17, 0};
+	reset();
+	response(rf, 2);
+	response(sleeping, 3);
+	assert(power_down_reader());
+	assert(held && deep_hold && writes == 2);
+	assert(tx_history[0][6] == 0x32 && tx_history[0][8] == 0);
+	assert(tx_history[1][6] == 0x16 && tx_history[1][7] == 0x10);
+	assert(now >= 10000);
+	reset();
+	response(rf, 2);
+	uint8_t refused[] = {0xd5, 0x17, 0x27};
+	response(refused, 3);
+	assert(!power_down_reader());
+	assert(!held && !deep_hold);
+	reset();
+	response(rf, 2);
+	response(sleeping, 2); /* Truncated status must not authorize sleep. */
+	assert(!power_down_reader());
+	assert(!held && !deep_hold);
+	reset();
+	response(rf, 2); /* PowerDown response lost. */
+	assert(!power_down_reader());
+	assert(!held && !deep_hold);
+	pn532_uart_init();
+	assert(!held && !deep_hold);
+	reset();
+	auto_reply = true;
+	assert(initialize_reader());
+	assert(writes == 4 && tx_history[0][0] == 0x55 && tx_history[0][1] == 0x55);
+	reset();
+	auto_reply = sleep_requested = true;
+	start_polling(NULL); /* Absence path returns before any card callback. */
+	assert(held && deep_hold && writes == 6);
+	assert(tx_history[5][6] == 0x16);
 	puts("PN532: ECP frame/CRC-A, raw transmit and expected timeout; startup prefix preserved; APDU >64 bytes; status/chaining rejection; fragmented "
 		 "frames, checksums, timeout and UID parsing passed");
 }

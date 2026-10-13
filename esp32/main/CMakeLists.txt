@@ -16,7 +16,7 @@ elseif(PNC532_TEST)
 	)
 else()
 	idf_component_register(
-		SRCS "main.c" "pn532.c" "relay.c"
+		SRCS "main.c" "pn532.c" "relay.c" "presence.c"
 		INCLUDE_DIRS "."
 		PRIV_REQUIRES bt nvs_flash driver esp_timer
 					  esp_hw_support esp_driver_uart

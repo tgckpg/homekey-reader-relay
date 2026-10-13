@@ -1,6 +1,8 @@
 #include <string.h>
 
 #include "driver/uart.h"
+#include "driver/gpio.h"
+#include "sdkconfig.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -8,6 +10,7 @@
 #include "freertos/task.h"
 #include "reader.h"
 #include "relay.h"
+#include "presence.h"
 
 #define PN532_UART UART_NUM_1
 #define PN532_TX_GPIO 3
@@ -15,6 +18,12 @@
 #define PN532_BAUD 115200
 #define COMMAND_TIMEOUT_MS 1000
 #define POLL_INTERVAL_MS 300
+
+#ifdef CONFIG_HOMEKEY_PRESENCE_ENABLED
+_Static_assert(CONFIG_HOMEKEY_PRESENCE_GPIO != PN532_TX_GPIO &&
+               CONFIG_HOMEKEY_PRESENCE_GPIO != PN532_RX_GPIO,
+               "LD2410S OT2 conflicts with PN532 UART");
+#endif
 
 static const char *TAG = "pn532";
 static const uint8_t ack[] = {0x00, 0x00, 0xff, 0x00, 0xff, 0x00};
@@ -33,6 +42,9 @@ static void pn532_uart_init(void)
 	ESP_ERROR_CHECK(uart_param_config(PN532_UART, &config));
 	ESP_ERROR_CHECK(uart_set_pin(PN532_UART, PN532_TX_GPIO, PN532_RX_GPIO,
 								 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+	/* Restore UART routing before releasing the idle-high sleep hold. */
+	ESP_ERROR_CHECK(gpio_hold_dis(PN532_TX_GPIO));
+	gpio_deep_sleep_hold_dis();
 	ESP_ERROR_CHECK(uart_flush_input(PN532_UART));
 	ESP_LOGI(TAG, "UART ready: TX=GPIO%d RX=GPIO%d baud=%d",
 			 PN532_TX_GPIO, PN532_RX_GPIO, PN532_BAUD);
@@ -292,6 +304,12 @@ static bool initialize_reader(void)
 
 	/* Discard stale input before starting this attempt. */
 	ESP_ERROR_CHECK(uart_flush_input(PN532_UART));
+	/* PowerDown wake requires oscillator startup time after serial activity.
+	 * Keep the proven startup packet too, but do not rely on its short prefix. */
+	static const uint8_t wake[] = {0x55, 0x55};
+	if (!write_bytes(wake, sizeof(wake)))
+		return false;
+	vTaskDelay(pdMS_TO_TICKS(10));
 
 	int n = command(firmware, sizeof(firmware), response);
 	if (n != 6 || response[2] != 0x32) {
@@ -314,6 +332,25 @@ static bool initialize_reader(void)
 	if (command(retries, sizeof(retries), response) != 2) {
 		return false;
 	}
+	return true;
+}
+
+static bool power_down_reader(void)
+{
+	static const uint8_t power_down[] = {0x16, 0x10}; /* HSU wake only */
+	uint8_t response[128];
+	release_rf();
+	int n = command(power_down, sizeof(power_down), response);
+	if (n != 3 || response[2] != 0) {
+		ESP_LOGE(TAG, "PN532 PowerDown not confirmed; staying awake to retry");
+		return false;
+	}
+	/* PN532 needs ~1ms after its response to enter PowerDown. */
+	vTaskDelay(pdMS_TO_TICKS(10));
+	ESP_ERROR_CHECK(uart_wait_tx_done(PN532_UART, pdMS_TO_TICKS(100)));
+	/* Preserve idle HIGH so the floating TX pin cannot wake the PN532. */
+	ESP_ERROR_CHECK(gpio_hold_en(PN532_TX_GPIO));
+	gpio_deep_sleep_hold_en();
 	return true;
 }
 
@@ -398,6 +435,18 @@ void start_polling(pn532_card_callback_t callback)
 
 	nfc_presence_t presence = {0};
 	for (;;) {
+		/* Only this task touches PN532. The synchronous card callback has
+		 * returned, so an in-flight authentication is never cut off here. */
+		if (presence_sleep_requested()) {
+			if (power_down_reader())
+				return;
+			/* A lost response leaves power state uncertain. Wake and restore
+			 * the reader before retrying; never blindly poll a sleeping chip. */
+			vTaskDelay(pdMS_TO_TICKS(1000));
+			while (!initialize_reader())
+				vTaskDelay(pdMS_TO_TICKS(2000));
+			continue;
+		}
 		nfc_card_t card = {0};
 		uint8_t group[8];
 		bool ecp = relay_ecp_group(group);
